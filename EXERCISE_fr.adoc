@@ -1,0 +1,781 @@
+= Application web simple avec Spring
+
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+endif::[]
+
+:hardbreaks-option:
+
+Préfixé par ✔️, des "checkpoints" pour vous aider à vérifier que vous avez tout bon.
+
+L’objectif de cet exercice est de construire une application web minimaliste (TODO list), utilisant *spring-mvc* pour la partie HTTP et *spring-jdbc* pour la persistance des données dans une base PostgreSQL.
+
+La pratique du SQL est nécessaire, ainsi que les notions d'_upsert_ et de pagination.
+
+== Prérequis
+
+* Git
+* Java 21
+* Maven 3.9.x
+* (Optionnel, mais fortement recommandé) IntelliJ edition _community_ 2024
+* Docker Compose V2 (Docker Desktop pour Windows et Mac)
+
+'''
+
+* Sur la page du template https://github.com/lernejo/maven-starter-template, cliquer sur "Use this template"
+* ⚠️ Renseigner comme nom de dépôt : *spring-todo-list*
+* Marquer le futur dépôt comme *private*
+* Une fois le dépôt créé, installer l'app https://github.com/apps/korekto[Korekto], ou mettre à jour sa configuration afin qu'elle ait accès à ce nouveau dépôt
+* Cloner le dépôt en utilisant l'*url SSH*
+* La branche par défaut est la branche *main*, c'est sur celle-ci que nous allons travailler
+
+== Partie 1 - BOM & Dépendances
+
+[NOTE]
+====
+On appelle BOM (**B**ill **O**f **M**aterials), une liste de librairies et frameworks dont les versions sont garanties compatibles.
+
+En effet, l’écosystème Java évolue très vite, et des changements incompatibles (méthodes ou classes qui disparaissent, etc.) arrivent fréquemment.
+
+Ainsi les plus gros frameworks (comme Spring-Boot) publient des BOM pour assurer que tous les binaires en dépendance d’un projet fonctionnent bien les uns avec les autres
+====
+
+* Dans le fichier *pom.xml*, ajouter le BOM de Spring-Boot dans la section `<dependencyManagement>`
+
+[source,xml]
+----
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-dependencies</artifactId>
+            <version>3.3.5</version>
+            <scope>import</scope>
+            <type>pom</type>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+----
+
+* Ajouter les dépendances qui nous intéressent dans la section `<dependencies>`
+
+[source,xml]
+----
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+        <!--1-->
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+
+    <!-- Needed for Argon2 algorithm -->
+    <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-jdk18on</artifactId>
+        <version>1.79</version>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+----
+
+<1> La version n’est pas précisée, car elle est gérée par le BOM
+
+== Partie 2 - Sécurité
+
+[NOTE]
+====
+L'authentification "Basic" consiste à passer un header HTTP ayant pour :
+* Clé : `Authentication`
+* Valeur : `basic` suivi d'un expace et de la conversion en base 64 de la chaine composée de l'identifiant et du mot de passe séparés par `:`
+
+Ex : `Authentication: basic YWxhZGRpbjpzZXNhbWVPdXZyZVRvaQ==`
+====
+
+[NOTE]
+====
+Avec ce type d'authentification, les utilisateurs font confiance à la plateforme à laquelle ils donnent identifiant et mot de passe.
+
+Il est donc nécessaire de stocker ces informations en respectant les dernières normes en termes de sécurité.
+
+Celà veut donc dire, qu'on ne stockera pas le mot de passe, mais une version hashée de celui-ci.
+De plus, l'algorithme sera le plus à jour : Argon2.
+
+Pour celà, utiliser les classes `Argon2PasswordEncoder` et `BasicAuthenticationFilter` fournies par *spring-security*.
+
+Le endpoint permettant la création de compte sera responsable de stocker une version hashée du mot de passe, et le filtre de stocker l'identité de l'utilisateur courant, si le header HTTP correspondant est présent.
+====
+
+**Spring-security** fourni un certain nombre de classes permettant de gérer le plus gros du travail d'authentification.
+
+* Créer la classe `fr.lernejo.todo.TodoListApp` contenant la fonction `main`, qui démarrera le _framework_ **Spring-boot**, en utilisant la classe `SpringApplication` et l'annotation `@SpringBootApplication(exclude = ErrorMvcAutoConfiguration.class)`
+* Créer la classe suivante dans le même package :
+
+[source,java]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfiguration {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .authorizeHttpRequests(eir -> eir
+                .requestMatchers(HttpMethod.POST, "/api/account").permitAll()
+                .anyRequest().authenticated()
+            )
+            .httpBasic(Customizer.withDefaults())
+            .exceptionHandling(e -> e.defaultAuthenticationEntryPointFor(
+                new NoOpAuthenticationEntryPoint(),
+                new AntPathRequestMatcher("/api/account", HttpMethod.POST.name()))
+            )
+        ;
+        return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new DelegatingPasswordEncoder(
+            "argon2",
+            Map.of("argon2", Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8()));
+    }
+
+    @Bean
+    public DaoAuthenticationProvider authProvider(PasswordEncoder passwordEncoder, UserDetailsService userDetailsService) {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder);
+        return authProvider;
+    }
+
+    @Bean
+    public AuthenticationManager authManager(HttpSecurity http, DaoAuthenticationProvider authProvider) throws Exception {
+        return http.getSharedObject(AuthenticationManagerBuilder.class)
+            .authenticationProvider(authProvider)
+            .build();
+    }
+}
+----
+
+* Créer une implémentation de `UserDetailsService` et annotée là avec `@Service`
+* ✔️ L'application démarre, mais ne fait rien
+
+== Partie 3 - Endpoints HTTP
+
+L'application va permettre à différents utilisateurs de :
+* Créer des listes * Les partager en lecture ou écriture à d'autres utilisateurs * Ajouter des élèments dans ses listes ou les listes partagées en écriture avec soi
+
+Pour cette partie, il est suggéré de stocker les données en mémoire, la persistence en base de données sera traitée dans la partie d'après.
+
+À l'exception de création de compte, tous les endpoints nécessiteront d'être authentifié, grâce au schéma _Basic authentication_, dans le cas contraire, le code de réponse attendu est 401.
+
+=== Endpoint de création de compte utilisateur
+
+* `POST /api/account`
+* Schéma du corps de la requête :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "email": {
+            "type": "string"
+        },
+        "password": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "email",
+        "password"
+    ]
+}
+----
+
+* La réponse aura un des statuts HTTP suivant :
+** 201 : Le compte a été créé
+** 409 : Le compte avec cet identifiant existe déjà
+** 400 : La requête est malformée ou le mot de passe est trop court (moins de 10 chars)
+
+=== Endpoint retournant l'utilisateur courant
+* `GET /api/account/self`
+* Schéma du corps de la réponse :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "uuid": {
+            "type": "string"
+        },
+        "email": {
+            "type": "string"
+        },
+        "created_at": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "uuid",
+        "email",
+        "created_at"
+    ]
+}
+----
+
+* La réponse aura le statut HTTP 200
+
+=== Endpoint permettant de lister les listes
+
+Ce endpoint retournera les listes créées par l'utilisateur courant ou partagées avec lui.
+
+* `GET /api/todolist`
+* Paramètres de la requêtes :
+** `page` : (`1` par défaut) index de la page à retourner (min : 1)
+** `page_size`: (`25` par défaut) taille de la page (min : 10, max : 100)
+** `sort`: (`updated_date` par défaut) champ par lequel trier la liste (valeurs possibles : `updated_date`, `created_date`, `title`)
+* La réponse aura le statut HTTP 200
+* Schéma du corps de la réponse :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "uuid": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "author": {
+                        "type": "string"
+                    },
+                    "created_date": {
+                        "type": "string"
+                    },
+                    "updated_date": {
+                        "type": "string"
+                    },
+                    "shared_read": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "shared_write": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "todo_count": {
+                      "type": "integer"
+                    }
+                },
+                "required": [
+                    "uuid",
+                    "title",
+                    "author",
+                    "created_date",
+                    "updated_date",
+                    "shared_read",
+                    "shared_write",
+                    "todo_count"
+                ]
+            }
+        },
+        "count": {
+            "type": "integer"
+        },
+        "page": {
+            "type": "integer"
+        },
+        "page_size": {
+            "type": "integer"
+        },
+        "total_count": {
+            "type": "integer"
+        },
+        "total_page_count": {
+            "type": "integer"
+        }
+    },
+    "required": [
+        "items",
+        "count",
+        "page",
+        "page_size",
+        "total_count",
+        "total_page_count"
+    ]
+}
+----
+
+=== Endpoint permettant de créer une nouvelle liste
+
+* `POST /api/todolist`
+* Schéma du corps de la requête :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "title": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "title",
+        "description"
+    ]
+}
+----
+
+* La réponse aura un des statuts HTTP suivant :
+** 201 : La liste a été créée
+** 409 : Une liste avec ce titre existe déjà pour l'utilisateur courant (listes créées ou partagées)
+** 400 : La requête est malformée
+* Schéma du corps de la réponse pour 201 :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "uuid": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "uuid"
+    ]
+}
+----
+
+=== Endpoint permettant de partager une liste avec un autre utilisateur
+
+Cette action sera ce qu'on appelle communément un "upsert", c'est-à-dire que la permission sera créée si elle n'existe pas, ou mise à jour si elle existe.
+
+* `POST /api/todolist/permission`
+* Schéma du corps de la requête :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "todolist_uuid": {
+            "type": "string"
+        },
+        "user_email": {
+            "type": "string"
+        },
+        "permission_type": {
+            "type": "string",
+            "enum": ["READ_ONLY", "READ_WRITE"]
+        }
+    },
+    "required": [
+        "title",
+        "description"
+    ]
+}
+----
+
+* La réponse aura un des statuts HTTP suivant :
+** 200 : La permission a été mise à jour
+** 201 : La permission a été créée
+** 403 : L'utilisateur courant n'est pas l'auteur de la liste indiquée, ou celle-ci n'existe pas
+** 404 : L'utilisateur indiqué est l'utilisateur courant ou n'existe pas
+** 400 : La requête est malformée
+
+=== Endpoint permettant de supprimer un partage
+
+* `DELETE /api/todolist/{uuid}/permission/{user_email}`
+* La réponse aura un des statuts HTTP suivant :
+** 204 : La permission a été supprimée
+** 403 : L'utilisateur courant n'est pas l'auteur de la liste indiquée, ou celle-ci n'existe pas
+** 404 : L'utilisateur indiqué est l'utilisateur courant ou n'existe pas
+
+=== Endpoint permettant de mettre à jour une liste
+
+* `PUT /api/todolist/{uuid}`
+* Schéma du corps de la requête :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "title": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "title",
+        "description"
+    ]
+}
+----
+
+* La réponse aura un des statuts HTTP suivant :
+** 204 : La liste a été mise à jour
+** 404 : L'utilisateur courant n'a pas accès en écriture à la liste, ou celle-ci n'existe pas
+** 400 : La requête est malformée
+
+=== Endpoint permettant d'avoir le détail d'une liste
+
+* `GET /api/todolist/{uuid}`
+* La réponse aura un des statuts HTTP suivant :
+** 200 : La liste a été mise à jour
+** 404 : L'utilisateur courant n'a pas accès à la liste, ou celle-ci n'existe pas
+* Schéma du corps de la réponse pour 200 :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "uuid": {
+            "type": "string"
+        },
+        "title": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "author": {
+            "type": "string"
+        },
+        "created_date": {
+            "type": "string"
+        },
+        "updated_date": {
+            "type": "string"
+        },
+        "shared_read": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "shared_write": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "todos": {
+          "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "uuid": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["TODO", "IN_PROGRESS", "DONE"]
+                    },
+                    "author": {
+                      "type": "string"
+                    },
+                    "last_update_author": {
+                      "type": "string"
+                    },
+                    "created_date": {
+                        "type": "string"
+                    },
+                    "updated_date": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "uuid",
+                    "description",
+                    "author",
+                    "last_update_author",
+                    "created_date",
+                    "updated_date"
+                ]
+            }
+        }
+    },
+    "required": [
+        "uuid",
+        "title",
+        "description",
+        "author",
+        "created_date",
+        "updated_date",
+        "shared_read",
+        "shared_write",
+        "todos"
+    ]
+}
+----
+
+=== Endpoint permettant d'ajouter une note dans une liste
+
+* `POST /api/todolist/{uuid}/todo`
+* Schéma du corps de la requête :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "description": {
+            "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["TODO", "IN_PROGRESS", "DONE"]
+        }
+    },
+    "required": [
+        "description",
+        "status"
+    ]
+}
+----
+
+* La réponse aura un des statuts HTTP suivant :
+** 201 : La note a été créée
+** 404 : La liste n'existe pas ou l'utilisateur n'y a pas accès en écriture
+** 400 : La requête est malformée
+* Schéma du corps de la réponse pour 201 :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "uuid": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "uuid"
+    ]
+}
+----
+
+=== Endpoint permettant de mettre à jour une note dans une liste
+
+* `PUT /api/todolist/{todolist_uuid}/todo/{todo_uuid}`
+* Schéma du corps de la requête :
+
+[source,json]
+----
+{
+    "$schema": "http://json-schema.org/schema#",
+    "type": "object",
+    "properties": {
+        "description": {
+            "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["TODO", "IN_PROGRESS", "DONE"]
+        }
+    },
+    "required": [
+        "description",
+        "status"
+    ]
+}
+----
+
+* La réponse aura un des statuts HTTP suivant :
+** 204 : La note a été mise à jour
+** 404 : L'utilisateur courant n'a pas accès en écriture à la liste, ou celle-ci n'existe pas
+** 400 : La requête est malformée
+
+=== Endpoint permettant de supprimer une note
+
+* `DELETE /api/todolist/{todolist_uuid}/todo/{todo_uuid}`
+* La réponse aura un des statuts HTTP suivant :
+** 204 : La note a été supprimée
+** 404 : L'utilisateur courant n'a pas accès en écriture à la liste, ou celle-ci n'existe pas, ou la note n'existe pas
+
+=== Endpoint permettant de supprimer une liste
+
+* `DELETE /api/todolist/{uuid}`
+* La réponse aura un des statuts HTTP suivant :
+** 204 : La liste a été supprimée
+** 404 : L'utilisateur courant n'est pas l'auteur de la liste, ou celle-ci n'existe pas
+
+== Partie 4 - Persistence en base de données
+
+[NOTE]
+====
+Quand une application persiste ses données dans une base, il est nécessaire que le schéma, composé de tables et d'indexes, a minima, existe.
+
+Cependant, au fur et à mesure de l'évolution de l'application, le schéma peut évoluer.
+Le plus aisé est de gérer cette évolution directement depuis l'application.
+
+Au démarrage, l'application va regarder quels sont scripts ont déjà été joués, et jouer uniquement les autres, dans l'ordre dans lequel ils sont déclarés.
+====
+
+[NOTE]
+====
+Quand on souhaite réaliser plusieurs opérations de manière _atomique_ (elles sont toutes réalisées, ou aucune), il est possible d'utiliser une _transaction_.
+
+Au sein d'une transaction, plusieurs opérations peuvent être réalisées, et effectives seulement à la fin, quand la transaction est _commitée_ (ou aucune, si la transaction est _rollbackée__).
+
+Cependant, il peut être plus simple de profiter du support du langage de la base de données afin de réaliser des opérations moyennement complexes en une seule requête SQL.
+
+C'est le cas de l'_upsert_ (diminutif de _insert or update_), supporté par PostgreSQL.
+
+La syntaxe est la suivante :
+
+[source,sql]
+----
+INSERT INTO vegetable (name, quantity)
+VALUES (:name, :quantity)
+ON CONFLICT (name) DO UPDATE SET quantity = :quantity, updated_at = NOW()
+RETURNING *
+----
+
+Cet exemple suppose qu'il existe une contrainte d'unicité sur la colonne `name` de la table `vegetable`.
+
+La clause returning permet de retourner toutes les colonnes de la ligne insérée ou modifiée, y compris les colonnes dont les valeurs ont été générées à l'insertion (`SERIAL` ou `DEFAULT func()`), ce qui évite d'avoir à faire une deuxième requête sur le `name` pour récupérer l'ID.
+====
+
+La gestion de schéma étant une mécanique un peu fastidieuse à implémenter à la main, nous allons utiliser une bibliothèque, intégrée à Spring : Flyway.
+
+Les scripts de migrations seront à créer dans le répertoire `src/main/resources/db/migration`, avec la convention de nommage : `V<YYYYMMDDHHMM>\__<description>.sql`.
+Exemple : `V202411031648__init.sql`
+
+Pour ce qui est de la base de données, nous utiliserons PostgreSQL.
+
+* Démarrer un service Docker tel que :
+
+[source,yaml]
+----
+services:
+  postgres:
+    image: postgres:16.0-alpine
+    container_name: postgres
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_PASSWORD: example
+----
+
+* Ajouter les dépendances suivantes :
+
+[source,xml]
+----
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.postgresql</groupId>
+        <artifactId>postgresql</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.flywaydb</groupId>
+        <artifactId>flyway-database-postgresql</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+</dependencies>
+----
+
+* Créer le fichier src/main/resources/application.yml avec le contenu :
+[source,yaml]
+----
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432,postgres:5432/postgres
+    username: postgres
+    password: example
+  mvc:
+    problemdetails:
+      enabled: true
+----
+
+* Créer le script initialisant le schéma nécessaire au stockage des données de l'application
+** Exemple pour la table des utilisateurs :
+[source,sql]
+----
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE "user" (
+  id SERIAL PRIMARY KEY,
+  uuid UUID DEFAULT gen_random_uuid() NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  email VARCHAR NOT NULL,
+  encoded_password VARCHAR NOT NULL,
+  UNIQUE (email)
+)
+----
+
+* ✔️ Plusieurs tables sont nécessaires
+* Injecter par construction un objet de type `NamedParameterJdbcTemplate` dans les classes annotées `@Repository`
+** Cette objet permettra d'exécuter les requêtes SQL, ex :
+[source,java]
+----
+public UserEntity findByEmail(String email) {
+    try {
+        return template.queryForObject(
+                """
+                        SELECT *
+                        FROM "user"
+                        WHERE email = :email
+                        """,
+                Map.of("email", email),
+                userRowMapper);
+    } catch (EmptyResultDataAccessException e) {
+        return null;
+    }
+}
+----
+
+* ✔️ L'état de l'application (cohérence entre les appels API) est conservé même en cas de redémarrage.
