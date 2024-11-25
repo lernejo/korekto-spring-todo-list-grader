@@ -408,8 +408,9 @@ Cette action sera ce qu'on appelle communément un "upsert", c'est-à-dire que l
         }
     },
     "required": [
-        "title",
-        "description"
+        "todolist_uuid",
+        "user_email",
+        "permission_type"
     ]
 }
 ----
