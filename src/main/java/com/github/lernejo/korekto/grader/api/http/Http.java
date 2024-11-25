@@ -3,6 +3,7 @@ package com.github.lernejo.korekto.grader.api.http;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.lernejo.korekto.grader.api.TestData;
 import com.github.lernejo.korekto.grader.api.http.scenario.ScenarioBuilder;
 import org.jetbrains.annotations.NotNull;
 

@@ -10,9 +10,9 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 public class StepBuilder {
+    public final int index;
     private final ScenarioBuilder scenario;
     private final Http http;
-    public final int index;
     StepRequestBuilder request;
     StepResponseMatcher expectedResponse;
 
@@ -49,13 +49,17 @@ public class StepBuilder {
     }
 
     public StepRequestBuilder expect_post(String uri, String body) {
-        StepRequestBuilder request = new StepRequestBuilder(scenario, this, uri, Verb.POST, Map.of(), body);
-        setRequest(request);
-        return request;
+        return expect_post(uri, body, Map.of());
     }
 
     public StepRequestBuilder expect_get(String uri, Map<String, String> headers) {
         StepRequestBuilder request = new StepRequestBuilder(scenario, this, uri, Verb.GET, headers);
+        setRequest(request);
+        return request;
+    }
+
+    public StepRequestBuilder expect_post(String uri, String body, Map<String, String> headers) {
+        StepRequestBuilder request = new StepRequestBuilder(scenario, this, uri, Verb.POST, headers, body);
         setRequest(request);
         return request;
     }
