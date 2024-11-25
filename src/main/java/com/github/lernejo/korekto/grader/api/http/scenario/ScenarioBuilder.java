@@ -19,7 +19,7 @@ public class ScenarioBuilder {
     }
 
     public ScenarioBuilder new_step(Consumer<StepBuilder> stepBuilderConsumer) {
-        StepBuilder stepBuilder = new StepBuilder(this, http);
+        StepBuilder stepBuilder = new StepBuilder(this, http, steps.size() +1);
         stepBuilderConsumer.accept(stepBuilder);
         steps.add(stepBuilder);
         return this;

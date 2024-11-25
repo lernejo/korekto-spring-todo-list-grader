@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class StepRequestBuilder {
     private final ScenarioBuilder scenario;
@@ -27,8 +28,8 @@ public class StepRequestBuilder {
         this.body = body;
     }
 
-    public StepResponseBuilder to_respond_with_status(int statusCode) {
-        StepResponseBuilder response = new StepResponseBuilder(statusCode);
+    public StepResponseMatcher to_respond_with_status(int statusCode) {
+        StepResponseMatcher response = new StepResponseMatcher(statusCode);
         stepBuilder.setExpectedResponse(response);
         return response;
     }
@@ -38,13 +39,19 @@ public class StepRequestBuilder {
         return this;
     }
 
+    public StepRequestBuilder with_data(ToFormatInput data) {
+        this.data = Set.of(data);
+        return this;
+    }
+
     List<StepRequest> build() {
         if (data == null) {
-            return List.of(new StepRequest(uri, verb, headers, body));
+            return List.of(new StepRequest(uri, verb, headers, body, null, String.valueOf(stepBuilder.index)));
         } else {
+            AtomicInteger dataIndex = new AtomicInteger();
             return data.stream()
-                .map(ToFormatInput::toFormatInput)
-                .map(i -> new StepRequest(format(uri, i), verb, headers, format(body, i)))
+                .map(d -> new Pair<>(d.toFormatInput(), d.name()))
+                .map(p -> new StepRequest(format(uri, p.first()), verb, headers, format(body, p.first()), p.second(), stepBuilder.index + "." + dataIndex.incrementAndGet()))
                 .toList();
         }
     }

@@ -5,7 +5,7 @@ import com.github.lernejo.korekto.grader.api.http.Response;
 
 import java.util.Map;
 
-record StepRequest(String uri, Verb verb, Map<String, String> headers, String body) {
+record StepRequest(String uri, Verb verb, Map<String, String> headers, String body, String dataSetName, String index) {
 
     Response executeWith(Http http) {
         return switch (verb) {

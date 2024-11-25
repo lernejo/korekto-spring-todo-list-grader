@@ -12,19 +12,21 @@ import java.util.stream.Stream;
 public class StepBuilder {
     private final ScenarioBuilder scenario;
     private final Http http;
+    public final int index;
     StepRequestBuilder request;
-    StepResponseBuilder expectedResponse;
+    StepResponseMatcher expectedResponse;
 
-    public StepBuilder(ScenarioBuilder scenario, Http http) {
+    public StepBuilder(ScenarioBuilder scenario, Http http, int index) {
         this.scenario = scenario;
         this.http = http;
+        this.index = index;
     }
 
     public void setRequest(StepRequestBuilder request) {
         this.request = request;
     }
 
-    public void setExpectedResponse(StepResponseBuilder expectedResponse) {
+    public void setExpectedResponse(StepResponseMatcher expectedResponse) {
         this.expectedResponse = expectedResponse;
     }
 

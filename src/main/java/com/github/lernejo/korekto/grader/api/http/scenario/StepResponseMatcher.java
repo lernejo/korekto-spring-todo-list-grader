@@ -10,36 +10,37 @@ import com.github.lernejo.korekto.grader.api.http.Result;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class StepResponseBuilder {
+public class StepResponseMatcher {
     private static final ComparatorWithoutOrder NODE_COMPARATOR = new ComparatorWithoutOrder(true);
     private final int expectedStatusCode;
     private String expectedContentType;
     private List<String> expectedJsonNodeKeys;
     private Map<String, String> expectedJsonNodes;
 
-    public StepResponseBuilder(int expectedStatusCode) {
+    public StepResponseMatcher(int expectedStatusCode) {
         this.expectedStatusCode = expectedStatusCode;
     }
 
-    public StepResponseBuilder and_json_body() {
+    public StepResponseMatcher and_json_body() {
         this.expectedContentType = "application/json";
         return this;
     }
 
-    public StepResponseBuilder and_json_body_containing_node_keys(String... nodeKeys) {
+    public StepResponseMatcher and_json_body_containing_node_keys(String... nodeKeys) {
         and_json_body();
         expectedJsonNodeKeys = Arrays.stream(nodeKeys).toList();
         return this;
     }
 
-    public StepResponseBuilder and_json_body_containing_nodes(Map<String, String> expectedJsonNodes) {
+    public StepResponseMatcher and_json_body_containing_nodes(Map<String, String> expectedJsonNodes) {
         this.expectedJsonNodes = expectedJsonNodes;
         return this;
     }
 
     List<String> match(StepRequest request, Response response) {
-        String authenticationHint = request.headers().containsKey("Authentication") ? "with" : "without";
-        String errorPrefix = "Expecting call to `%s %s` %s authentication to".formatted(request.verb(), request.uri(), authenticationHint);
+        String authenticationHint = request.headers().containsKey("Authorization") ? "with" : "without";
+        String datasetHint = request.dataSetName() != null ? "and dataset %s ".formatted(request.dataSetName()) : "";
+        String errorPrefix = "Step %s - Expecting call to `%s %s` %s authentication %sto".formatted(request.index(), request.verb(), request.uri(), authenticationHint, datasetHint);
         if (expectedStatusCode != response.status()) {
             return List.of("%s return a %s status code, but was: %s"
                 .formatted(errorPrefix, expectedStatusCode, response.status()));
@@ -80,7 +81,7 @@ public class StepResponseBuilder {
                     errors.add("%s have a response body with the JSON node: %s".formatted(errorPrefix, expectedNode.getKey()));
                 } else {
                     boolean textFailure = jsonNode.getNodeType() == JsonNodeType.STRING && !jsonNode.asText().equals(expectedNode.getValue());
-                    boolean treeFailure = NODE_COMPARATOR.compare(jsonNode, Http.readTree(expectedNode.getValue())) != 0;
+                    boolean treeFailure = jsonNode.getNodeType() != JsonNodeType.STRING && NODE_COMPARATOR.compare(jsonNode, Http.readTree(expectedNode.getValue())) != 0;
                     if (textFailure || treeFailure) {
                         errors.add("%s have a response body with JSON node %s having value: %s, but was: %s"
                             .formatted(errorPrefix, expectedNode.getKey(), expectedNode.getValue(), Http.writeValueAsString(jsonNode)));

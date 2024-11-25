@@ -3,5 +3,4 @@
 
     <logger name="org.codehaus" level="ERROR" />
     <logger name="org.apache" level="WARN" />
-    <logger name="org.testcontainers" level="DEBUG"/>
 </configuration>
