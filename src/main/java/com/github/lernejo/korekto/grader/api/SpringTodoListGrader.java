@@ -1,6 +1,7 @@
 package com.github.lernejo.korekto.grader.api;
 
 import com.github.lernejo.korekto.grader.api.parts.Part1Grader;
+import com.github.lernejo.korekto.grader.api.parts.Part2Grader;
 import com.github.lernejo.korekto.toolkit.Grader;
 import com.github.lernejo.korekto.toolkit.GradingConfiguration;
 import com.github.lernejo.korekto.toolkit.PartGrader;
@@ -55,7 +56,8 @@ public class SpringTodoListGrader implements Grader<LaunchingContext> {
                 "Compilation & Tests",
                 1.0D),
             new JacocoCoveragePartGrader<>("Code Coverage", 10.0D, 0.90D),
-            new Part1Grader("Part 1 - Account", 3.0D)
+            new Part1Grader("Part 1 - Account", 3.0D),
+            new Part2Grader("Part 2 - Todolist creation", 3.0D)
         );
     }
 

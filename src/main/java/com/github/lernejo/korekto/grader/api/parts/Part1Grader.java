@@ -1,7 +1,6 @@
 package com.github.lernejo.korekto.grader.api.parts;
 
 import com.github.lernejo.korekto.grader.api.LaunchingContext;
-import com.github.lernejo.korekto.grader.api.TestData;
 import com.github.lernejo.korekto.grader.api.http.Http;
 import com.github.lernejo.korekto.grader.api.http.HttpConnectionException;
 import com.github.lernejo.korekto.toolkit.GradePart;
@@ -17,12 +16,9 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 
-public record Part1Grader(String name, Double maxGrade) implements PartGrader<LaunchingContext> {
+import static com.github.lernejo.korekto.grader.api.LaunchingContext.basicHeader;
 
-    @NotNull
-    private static Map<String, String> basicHeader(TestData.UserDef user) {
-        return Map.of("Authorization", Http.basic(user.email(), user.password()));
-    }
+public record Part1Grader(String name, Double maxGrade) implements PartGrader<LaunchingContext> {
 
     @NotNull
     @Override
@@ -40,7 +36,11 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
              Http client = new Http("http://localhost:8085")) {
             Ports.waitForPortToBeListenedTo(8085, TimeUnit.SECONDS, LaunchingContext.serverStartTime());
 
-            return interrogateServer_part1(client, context);
+            List<String> errors = interrogateServer_part1(client, context);
+            if (errors.isEmpty()) {
+                Part2Grader.interrogateServer_part2(client, context);
+            }
+            return result(errors, maxGrade - errors.size() * (maxGrade / 3));
         } catch (CancellationException e) {
             return result(List.of("Server failed to start within 20 sec."), 0.0D);
         } catch (HttpConnectionException e) {
@@ -53,11 +53,15 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
     }
 
     @NotNull
-    private GradePart interrogateServer_part1(Http client, LaunchingContext context) {
-        var errors = client.new_scenario()
+    private List<String> interrogateServer_part1(Http client, LaunchingContext context) {
+        return client.new_scenario()
             .new_step(s ->
                 s.expect_get("/api/account")
                     .to_respond_with_status(401)
+            )
+            .new_step(s ->
+                s.expect_post("/api/account", "{toto")
+                    .to_respond_with_status(400)
             )
             .new_step(s ->
                 s.expect_post("/api/account", """
@@ -86,7 +90,5 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
                     .to_respond_with_status(409)
             )
             .execute();
-
-        return result(errors, maxGrade - errors.size() * (maxGrade / 3));
     }
 }
