@@ -1,13 +1,9 @@
 package com.github.lernejo.korekto.grader.api.parts;
 
-import com.fasterxml.jackson.core.JacksonException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.github.lernejo.korekto.grader.api.LaunchingContext;
 import com.github.lernejo.korekto.grader.api.TestData;
 import com.github.lernejo.korekto.grader.api.http.Http;
 import com.github.lernejo.korekto.grader.api.http.HttpConnectionException;
-import com.github.lernejo.korekto.grader.api.http.Response;
-import com.github.lernejo.korekto.grader.api.http.Result;
 import com.github.lernejo.korekto.toolkit.GradePart;
 import com.github.lernejo.korekto.toolkit.PartGrader;
 import com.github.lernejo.korekto.toolkit.misc.Ports;
@@ -25,7 +21,7 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
 
     @NotNull
     private static Map<String, String> basicHeader(TestData.UserDef user) {
-        return Map.of("Authentication", Http.basic(user.email(), user.password()));
+        return Map.of("Authorization", Http.basic(user.email(), user.password()));
     }
 
     @NotNull
@@ -38,7 +34,9 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
         try
             (MavenExecutionHandle ignored = MavenExecutor.executeGoalAsync(context.getExercise(), context.getConfiguration().getWorkspace(),
                 "org.springframework.boot:spring-boot-maven-plugin:3.3.5:run " +
-                    "-Dspring-boot.run.jvmArguments='-Dserver.port=8085 -Dspring.datasource.url=" + context.pgUrl() + "'");
+                    "-Dspring-boot.run.jvmArguments='" +
+                    "-Dserver.port=8085 -Dspring.datasource.url=" + context.pgUrl() + " -Dspring.datasource.username=postgres -Dspring.datasource.password=example" +
+                    "'");
              Http client = new Http("http://localhost:8085")) {
             Ports.waitForPortToBeListenedTo(8085, TimeUnit.SECONDS, LaunchingContext.serverStartTime());
 
@@ -64,8 +62,8 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
             .new_step(s ->
                 s.expect_post("/api/account", """
                         {
-                            "email": "%s",
-                            "password": "%s"
+                            "email": "{email}",
+                            "password": "{password}"
                         }
                         """)
                     .repeat(Set.of(context.testData.user1, context.testData.user2, context.testData.user3, context.testData.user4))
@@ -77,13 +75,18 @@ public record Part1Grader(String name, Double maxGrade) implements PartGrader<La
                     .and_json_body_containing_node_keys("uuid", "email", "created_at")
                     .and_json_body_containing_nodes(Map.of("email", context.testData.user2.email()))
             )
+            .new_step(s ->
+                s.expect_post("/api/account", """
+                        {
+                            "email": "{email}",
+                            "password": "{password}"
+                        }
+                        """)
+                    .with_data(context.testData.user3)
+                    .to_respond_with_status(409)
+            )
             .execute();
 
-        if (!errors.isEmpty()) {
-            result(errors, 0.0D);
-        }
-
-        return result(List.of(), maxGrade());
+        return result(errors, maxGrade - errors.size() * (maxGrade / 3));
     }
-
 }

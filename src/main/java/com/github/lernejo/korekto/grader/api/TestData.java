@@ -13,15 +13,15 @@ public class TestData {
     public final UserDef user4;
 
     public TestData(RandomSupplier randomSource) {
-        user1 = UserDef.build(randomSource);
-        user2 = UserDef.build(randomSource);
-        user3 = UserDef.build(randomSource);
-        user4 = UserDef.build(randomSource);
+        user1 = UserDef.build("user1", randomSource);
+        user2 = UserDef.build("user2", randomSource);
+        user3 = UserDef.build("user3", randomSource);
+        user4 = UserDef.build("user4", randomSource);
     }
 
-    public record UserDef(String email, String password) implements ToFormatInput {
-        static UserDef build(RandomSupplier randomSource) {
-            return new UserDef(randomSource.nextUuid() + "@korekto.io", randomSource.nextUuid().toString());
+    public record UserDef(String name, String email, String password) implements ToFormatInput {
+        static UserDef build(String name, RandomSupplier randomSource) {
+            return new UserDef(name, randomSource.nextUuid() + "@korekto.io", randomSource.nextUuid().toString());
         }
 
         @Override
